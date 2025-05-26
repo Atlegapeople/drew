@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# D.R.E.W. Vending Machine UI
 
-## Getting Started
+This is a touchscreen-optimized [Next.js](https://nextjs.org) project built for the **D.R.E.W.** vending machine system: **Dignity • Respect • Empowerment for Women**.
 
-First, run the development server:
+It provides a secure, clean interface for authenticating via RFID or PIN, selecting feminine hygiene products, and confirming dispense — all built with modular React components and simulated hardware hooks that can be swapped for real GPIO or serial triggers on a Raspberry Pi.
+
+---
+
+## 🚀 Getting Started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open [http://localhost:3000](http://localhost:3000) in your browser to see the UI.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🧱 Project Structure
 
-## Learn More
+```
+/src/app               # App Router pages for welcome, products, dispense, etc.
+/src/components        # UI components split by domain (auth, products, ui)
+/src/hooks             # Simulated RFID + dispense logic (hardware-ready)
+/public                # Assets (images, logos, icons)
+```
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🧪 Simulated Hardware Hooks
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+This project uses mocked versions of:
 
-## Deploy on Vercel
+* `useRFIDListener()` – Simulates RFID scan
+* `useDispenseController()` – Simulates dispense delay and callback
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+These can later be swapped with real hardware integrations (GPIO, serial, WebUSB).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## 🧼 Commands
+
+| Action         | Command              |
+| -------------- | -------------------- |
+| Run Dev Server | `npm run dev`        |
+| Build Prod     | `npm run build`      |
+| Start Prod     | `npm start`          |
+| Lint Fix       | `npx eslint . --fix` |
+
+---
+
+## 📦 Deployment
+
+Deploy via:
+
+* Local Node.js server on Raspberry Pi
+* Static export (`next export`) for kiosk use
+* [Vercel](https://vercel.com/) for staging/demo environments
+
+---
+
+## 👷 Project by [Atlega People](https://github.com/Atlegapeople)
+
+Built to provide equitable access to essential hygiene products for women, with empathy, dignity, and technology.
+
+---
+
+## 📚 Learn More
+
+* [Next.js Documentation](https://nextjs.org/docs)
+* [Tailwind CSS](https://tailwindcss.com)
+* [Deploying to Raspberry Pi](https://www.raspberrypi.com/documentation/computers/getting-started.html)
+
+---
+
+> Version: `v1.0-ui-complete`
