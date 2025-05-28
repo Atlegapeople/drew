@@ -1,15 +1,14 @@
 // src/lib/utils/simulate.ts
 
-import { useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation';
 
 export function useSimulateRFID() {
   const router = useRouter();
 
   const start = () => {
-    console.log('[SIM] Simulating RFID scan...');
-    setTimeout(() => {
-      router.push('/products');
-    }, 4000); // adjustable time
+    console.log('[SIM] Simulating RFID scan completed');
+    // We no longer need to route here as the auth context will handle routing
+    // This is just for visual feedback and logging now
   };
 
   return { start };

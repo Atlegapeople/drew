@@ -7,42 +7,54 @@ interface ProductCardProps {
   imageUrl: string;
   name: string;
   stock: number;
-  used: number;
-  quota: number;
+  maxStock: number;
   onClick: () => void;
+  disabled?: boolean;
 }
 
 export default function ProductCard({ 
   imageUrl, 
   name, 
   stock, 
-  used, 
-  quota,
-  onClick
+  maxStock,
+  onClick,
+  disabled = false
 }: ProductCardProps) {
   return (
-    <div className="relative pb-[100%] w-full"> {/* This creates a perfect square container */}
+    <div className="relative pb-[120%] w-full"> {/* Taller container to prevent overlap */}
       <button 
-        className="absolute inset-0 bg-white rounded-lg p-5 text-center border-2 border-gray-200 shadow-md transition-all hover:translate-y-[-2px] hover:shadow-lg hover:border-[#ff66c4] active:scale-95 select-none touch-manipulation flex flex-col items-center justify-between"
-        onClick={onClick}
+        className={`absolute inset-0 bg-white rounded-lg p-3 text-center border-2 border-gray-200 shadow-md transition-all ${!disabled ? 'hover:translate-y-[-2px] hover:shadow-lg hover:border-[#ff66c4] active:scale-95' : 'opacity-70 cursor-not-allowed'} select-none touch-manipulation flex flex-col items-center justify-between`}
+        onClick={!disabled ? onClick : undefined}
+        disabled={disabled}
       >
         <div className="flex-1 flex items-center justify-center w-full">
-          <div className="relative w-[120px] h-[120px]">
+          <div className="relative w-[100px] h-[100px]">
             <Image 
               src={imageUrl} 
               alt={`${name} product image`}
               fill
-              sizes="120px"
+              sizes="100px"
               className="object-contain"
               priority
             />
           </div>
         </div>
         <div className="flex flex-col items-center w-full">
-          <div className="text-xl font-bold text-gray-800 mb-2">{name}</div>
-          <div className="text-sm text-gray-600 mb-3 tracking-wide">{stock} units available</div>
-          <div className="bg-gray-100 rounded-md p-3 text-sm text-gray-700 w-full font-medium text-center tracking-wide">
-            {used}/{quota} used this month
+          <div className="text-lg font-bold text-gray-800 mb-1">{name}</div>
+          <div className="text-sm text-gray-600 mb-2 tracking-wide">
+            {stock} of {maxStock} units available
+            {stock === 0 && <div className="text-red-500 font-bold mt-1">Out of Stock</div>}
+          </div>
+          <div className="bg-gray-100 rounded-md p-2 text-sm font-medium text-center tracking-wide w-full mt-auto">
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
+              <div 
+                className={`h-2.5 rounded-full ${stock < maxStock * 0.2 ? 'bg-red-500' : 'bg-[#ff66c4]'}`} 
+                style={{ width: `${Math.min(100, (stock / maxStock) * 100)}%` }}
+              ></div>
+            </div>
+            <div className="mt-1 text-xs">
+              {Math.round((stock / maxStock) * 100)}% remaining
+            </div>
           </div>
         </div>
       </button>

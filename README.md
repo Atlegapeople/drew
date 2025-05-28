@@ -1,77 +1,83 @@
-# D.R.E.W. Vending Machine UI
+# ✅ D.R.E.W. Access System – Implementation Summary
 
-This is a touchscreen-optimized [Next.js](https://nextjs.org) project built for the **D.R.E.W.** vending machine system: **Dignity • Respect • Empowerment for Women**.
+**Project:** D.R.E.W. (Dignity • Respect • Empowerment for Women)  
+**Client:** ABSA  
+**Deployment Target:** Raspberry Pi 4 with 10” Touchscreen (Offline)
 
-It provides a secure, clean interface for authenticating via RFID or PIN, selecting feminine hygiene products, and confirming dispense — all built with modular React components and simulated hardware hooks that can be swapped for real GPIO or serial triggers on a Raspberry Pi.
-
----
-
-## 🚀 Getting Started
-
-```bash
-npm install
-npm run dev
-```
-
-Then open [http://localhost:3000](http://localhost:3000) in your browser to see the UI.
+This document outlines the current status of the D.R.E.W. access control system for smart feminine hygiene vending machines. The system is designed for secure, offline use and supports user authentication via RFID card or PIN entry.
 
 ---
 
-## 🧱 Project Structure
+## ✅ Authentication Requirements
 
-```
-/src/app               # App Router pages for welcome, products, dispense, etc.
-/src/components        # UI components split by domain (auth, products, ui)
-/src/hooks             # Simulated RFID + dispense logic (hardware-ready)
-/public                # Assets (images, logos, icons)
-```
+### 🔒 Lock Screen Entry Point
+- Implemented a secure lock screen as the default entry point.
+- Dual authentication modes provided:
+  - **RFID Card** (tap to authenticate)
+  - **PIN Entry** (via virtual keypad)
+- Access to the main dispensing interface is fully restricted until authentication is successful.
 
----
+### 🪪 RFID Access
+- Simulated RFID scan logic implemented (real hardware integration pending).
+- UID values verified against a local access list stored in SQLite.
+- Successful and failed scan events logged with timestamps.
+- Visual feedback provided for both success and failure scenarios.
 
-## 🧪 Simulated Hardware Hooks
-
-This project uses mocked versions of:
-
-* `useRFIDListener()` – Simulates RFID scan
-* `useDispenseController()` – Simulates dispense delay and callback
-
-These can later be swapped with real hardware integrations (GPIO, serial, WebUSB).
-
----
-
-## 🧼 Commands
-
-| Action         | Command              |
-| -------------- | -------------------- |
-| Run Dev Server | `npm run dev`        |
-| Build Prod     | `npm run build`      |
-| Start Prod     | `npm start`          |
-| Lint Fix       | `npx eslint . --fix` |
+### 🔢 PIN Access
+- Virtual PIN entry keypad implemented and touch-optimized.
+- PINs are securely validated against a local SQLite database using **SHA-256 + salt** hashing.
+- Added brute-force prevention: lockout after 3 failed attempts (60-second timeout).
+- User feedback clearly indicates lockouts, success, and failure conditions.
 
 ---
 
-## 📦 Deployment
+## ✅ Data Storage (Offline-First)
 
-Deploy via:
-
-* Local Node.js server on Raspberry Pi
-* Static export (`next export`) for kiosk use
-* [Vercel](https://vercel.com/) for staging/demo environments
-
----
-
-## 👷 Project by [Atlega People](https://github.com/Atlegapeople)
-
-Built to provide equitable access to essential hygiene products for women, with empathy, dignity, and technology.
+- Implemented SQLite as the local database engine.
+- Configured database tables:
+  - `access_profiles`: stores RFID UIDs, hashed PINs, and access levels.
+  - `access_logs`: captures all authentication attempts.
+  - `inventory_logs`: tracks product dispensing and remaining stock.
+- Database paths configured for both development and production environments.
+- No cloud or external database dependencies.
 
 ---
 
-## 📚 Learn More
+## ✅ Access Logic & Session Management
 
-* [Next.js Documentation](https://nextjs.org/docs)
-* [Tailwind CSS](https://tailwindcss.com)
-* [Deploying to Raspberry Pi](https://www.raspberrypi.com/documentation/computers/getting-started.html)
+- Built a React-based session handler using context.
+- Valid login sets an in-memory session token (`localStorage`).
+- Unauthorized users are redirected back to the lock screen (`/`).
+- Auto-logout occurs after **1 minute** of inactivity.
+- Manual logout option available from all protected screens.
 
 ---
 
-> Version: `v1.0-ui-complete`
+## ✅ Inventory Tracking (Bonus Feature)
+
+- Initial stock levels:
+  - Tampons: 50 units
+  - Pads: 50 units
+- Dispensing logic decrements stock on use.
+- Usage events logged for analytics/reporting.
+- Admin-side API endpoints available for:
+  - Viewing current inventory
+  - Resetting or replenishing inventory
+
+---
+
+## ✅ Technical Requirements & Status
+
+- System operates fully **offline** with all logic self-contained on the Pi.
+- UI is optimized for touchscreen use (large buttons, accessible layout).
+- All logic for RFID, GPIO, inventory, and session handling is modular and isolated for future updates.
+- Real RFID + GPIO hardware integration is **prepared and simulated**, pending final wiring and device testing.
+- Logs are stored locally and can be exported manually (future enhancement).
+
+---
+
+## ✅ Deployment Readiness
+
+- Current system is **deployment-ready** for a Raspberry Pi 4 with 10” touchscreen.
+- All authentication logic, session flow, and inventory features are working as expected.
+- Final step: integrate and test **real RFID and GPIO hardware** (drivers and logic already simulated).
