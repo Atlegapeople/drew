@@ -308,6 +308,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   
   // Logout
   const logout = () => {
+    // Clear authentication state
     setIsAuthenticated(false);
     setProfileId(null);
     setCardUid(null);
@@ -315,13 +316,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPin('');
     setAuthError(null);
     
+    // Remove the session from localStorage
     localStorage.removeItem('drew_session');
     
+    // Clear any session timeout
     if (sessionTimeoutId) {
       clearTimeout(sessionTimeoutId);
       setSessionTimeoutId(null);
     }
     
+    // Delete the latest.json file to prevent reuse of scanned cards
+    fetch('/api/admin/clear-card-scan', {
+      method: 'DELETE',
+    }).then(() => {
+      console.log('Latest card scan cleared during logout');
+    }).catch(error => {
+      console.error('Error clearing card scan during logout:', error);
+    });
+    
+    // Navigate back to the lock screen
     router.push('/lock');
   };
   

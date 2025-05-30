@@ -26,6 +26,12 @@ export default function RfidCardManager() {
   const [lastTimestamp, setLastTimestamp] = useState<string | null>(null);
   // State to track if RFID service is online
   const [isRfidServiceOnline, setIsRfidServiceOnline] = useState<boolean>(true);
+  // State to track successful card registration for UI feedback
+  const [lastRegisteredCard, setLastRegisteredCard] = useState<string | null>(null);
+  // State to track when a card is successfully deleted
+  const [lastDeletedCard, setLastDeletedCard] = useState<string | null>(null);
+  // State to track when a card is already registered in the system
+  const [alreadyRegisteredCard, setAlreadyRegisteredCard] = useState<string | null>(null);
 
   // Function to fetch registered cards from the server
   const fetchCards = async () => {
@@ -66,9 +72,16 @@ export default function RfidCardManager() {
       });
 
       if (response.ok) {
+        // Show a prominent toast notification
         toast.success('✅ Card registered successfully!', {
-          description: `Card ${newCardUID} has been added with ${accessLevel} access.`
+          description: `Card ${newCardUID} has been added with ${accessLevel} access.`,
+          duration: 8000 // Show for longer (8 seconds)
         });
+        
+        // Set the last registered card for UI feedback
+        setLastRegisteredCard(newCardUID);
+        setTimeout(() => setLastRegisteredCard(null), 5000); // Clear after 5 seconds
+        
         setNewCardUID(''); // Clear the card UID
         setPin(''); // Clear the PIN
         fetchCards(); // Refresh the list of cards
@@ -95,8 +108,13 @@ export default function RfidCardManager() {
           // Handle the already registered case more gracefully
           console.warn('Card is already registered, showing info toast instead of error');
           toast.info('📝 Card already in the system', {
-            description: 'This RFID card has already been registered. You can view it in the list below.'
+            description: 'This RFID card has already been registered. You can view it in the list below.',
+            duration: 8000 // Show for 8 seconds
           });
+          
+          // Set the already registered card state for UI feedback
+          setAlreadyRegisteredCard(newCardUID);
+          setTimeout(() => setAlreadyRegisteredCard(null), 5000); // Clear after 5 seconds
           
           // Clear the inputs as if it was successful
           setNewCardUID('');
@@ -136,20 +154,40 @@ export default function RfidCardManager() {
     });
 
     try {
-      const response = await fetch('/api/admin/delete-card', {
+      // For DELETE requests with body content in fetch API, we need to explicitly set the headers
+      // and ensure the body is properly stringified
+      console.log('Sending delete request for card:', cardUid);
+      
+      const response = await fetch(`/api/admin/delete-card?cardUid=${encodeURIComponent(cardUid)}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ cardUid }), // Changed from cardUID to cardUid to match API
+        // In some environments DELETE requests with bodies can be problematic
+        // So we're also including the cardUid in the URL query parameter above
+        body: JSON.stringify({ cardUid }),
       });
 
       if (response.ok) {
         // Dismiss loading toast and show success
         toast.dismiss(toastId);
         toast.success('✅ Card removed successfully', {
-          description: `Card ${cardUid} has been deleted from the system.`
+          description: `Card ${cardUid} has been deleted from the system.`,
+          duration: 8000 // Show for 8 seconds
         });
+        
+        // Set the last deleted card for UI feedback
+        setLastDeletedCard(cardUid);
+        setTimeout(() => setLastDeletedCard(null), 5000); // Clear after 5 seconds
+        
+        // Play a success sound if browser supports it
+        try {
+          const audio = new Audio('/sounds/success.mp3');
+          audio.play().catch(e => console.log('Sound could not be played'));
+        } catch (e) { 
+          // Ignore errors if audio not supported
+        }
+        
         fetchCards(); // Refresh the list
       } else {
         // Dismiss loading toast and show error
@@ -175,11 +213,22 @@ export default function RfidCardManager() {
   };
 
   // Function to start scanning for a card
-  const startCardScan = () => {
-    // If the RFID service is offline, show a message
+  const startCardScan = async () => {
+    // Check if the RFID service is online
     if (!isRfidServiceOnline) {
-      toast.error('RFID service is offline. Please ensure it is running.');
+      toast.error('RFID service is offline. Please check the connection.');
       return;
+    }
+    
+    try {
+      // First, clear any previous card scan file
+      await fetch('/api/admin/clear-card-scan', {
+        method: 'DELETE'
+      });
+      console.log('Cleared previous card scan before starting new scan');
+    } catch (error) {
+      console.error('Error clearing previous card scan:', error);
+      // Continue with scan even if clearing fails
     }
 
     // If we've already scanned a card, use it
@@ -310,6 +359,33 @@ export default function RfidCardManager() {
         <h2 className="text-xl font-bold mb-4">Register New RFID Card</h2>
         <p className="text-sm text-gray-500 mb-4">Add a new RFID card to the system</p>
         
+        {/* Visual confirmation when a card is registered */}
+        {lastRegisteredCard && (
+          <div className="bg-green-50 border border-green-200 text-green-800 p-4 mb-4 rounded-md animate-pulse">
+            <div className="flex items-center">
+              <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <p className="font-medium">Card registered successfully!</p>
+            </div>
+          </div>
+        )}
+        
+        {/* Visual notification when a card is already registered */}
+        {alreadyRegisteredCard && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-800 p-4 mb-4 rounded-md animate-pulse">
+            <div className="flex items-center">
+              <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+              <div>
+                <p className="font-medium">Card already registered</p>
+                <p className="text-sm">This card is already in the system. Check the list below.</p>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {!isRfidServiceOnline && (
           <div className="bg-red-50 text-red-600 p-3 rounded-md mb-4">
             <p className="font-medium">RFID service is offline</p>
@@ -380,6 +456,19 @@ export default function RfidCardManager() {
       {/* Registered Cards Section */}
       <div className="bg-white p-6 rounded-lg shadow-sm">
         <h2 className="text-xl font-bold mb-4">Registered Cards</h2>
+        
+        {/* Visual confirmation when a card is deleted */}
+        {lastDeletedCard && (
+          <div className="bg-red-50 border border-red-200 text-red-800 p-4 mb-4 rounded-md animate-pulse">
+            <div className="flex items-center">
+              <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <p className="font-medium">Card {lastDeletedCard} has been deleted successfully!</p>
+            </div>
+          </div>
+        )}
+        
         <p className="text-sm text-gray-500 mb-4">Managing {registeredCards.length} card(s)</p>
         
         <div className="flex justify-between mb-4">
