@@ -68,6 +68,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   
   // Effect to check if we have a stored session
   useEffect(() => {
+    // Only run on client side
+    if (typeof window === 'undefined') return;
+    
     const storedSession = localStorage.getItem('drew_session');
     
     if (storedSession) {
@@ -95,6 +98,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // No session and not on lock screen, redirect
       router.push('/lock');
     }
+    
+    // Cleanup function
+    return () => {
+      if (sessionTimeoutId) {
+        clearTimeout(sessionTimeoutId);
+      }
+    };
   }, [router]);
   
   // Effect to manage PIN lockout timer

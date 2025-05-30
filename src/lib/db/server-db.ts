@@ -1,9 +1,9 @@
 'use server';
 
 import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
-import crypto from 'crypto';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as crypto from 'crypto';
 
 // For development environments, store in project directory
 // For production on Raspberry Pi, use the specified path

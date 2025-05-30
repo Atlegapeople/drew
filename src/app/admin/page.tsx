@@ -7,9 +7,11 @@ import AdminNavbar from '@/components/admin/AdminNavbar';
 import InventoryPanel from '@/components/admin/InventoryPanel';
 import UsageChart from '@/components/admin/UsageChart';
 import AccessLogsPanel from '@/components/admin/AccessLogsPanel';
+import RfidCardManager from '@/components/admin/RfidCardManager';
 import Link from 'next/link';
 
 export default function AdminDashboardPage() {
+  console.log('Admin dashboard page rendered');
   const { isAuthenticated, accessLevel, logout } = useAuth();
   const router = useRouter();
   const [inventory, setInventory] = useState([]);
@@ -127,6 +129,17 @@ export default function AdminDashboardPage() {
             ) : (
               <AccessLogsPanel logs={accessLogs} />
             )}
+          </div>
+          
+          {/* RFID Card Management */}
+          <div className="bg-white p-5 rounded-lg shadow md:col-span-2 mt-6">
+            <h2 className="text-lg font-semibold mb-4 text-gray-700 flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-pink-500" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+              </svg>
+              RFID Card Management
+            </h2>
+            <RfidCardManager />
           </div>
         </div>
       </div>

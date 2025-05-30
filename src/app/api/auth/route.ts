@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance, verifyPin, hashPin } from '@/lib/db/server-db';
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 
 // Handle RFID authentication
 export async function POST(request: NextRequest) {
