@@ -26,6 +26,7 @@ interface AuthContextType {
   pinLockTimeRemaining: number;
   failedAttempts: number;
   authError: string | null;
+  setAuthError: (error: string | null) => void; // Add setAuthError function
   lastActivity: number;
   handleActivity?: () => void; // Add handleActivity function
   authenticateWithRFID: (cardUid?: string) => Promise<AuthResult>;
@@ -45,6 +46,7 @@ const AuthContext = createContext<AuthContextType>({
   pinLockTimeRemaining: 0,
   failedAttempts: 0,
   authError: null,
+  setAuthError: () => {},
   lastActivity: Date.now(),
   authenticateWithRFID: async () => ({ success: false }),
   authenticateWithPIN: async () => ({ success: false }),
@@ -359,9 +361,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Lock PIN entry after 3 failed attempts
         if (newFailedAttempts >= 3) {
           setPinLocked(true);
-          const lockTime = Date.now() + 60 * 1000; // 60 seconds
+          const lockTime = Date.now() + 5 * 1000; // 5 seconds
           setLockUntil(lockTime);
-          setAuthError('PIN entry locked for 60 seconds');
+          setAuthError('PIN entry locked for 5 seconds');
         } else {
           setAuthError(result.message || 'Invalid PIN');
         }
@@ -420,6 +422,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         pinLockTimeRemaining,
         failedAttempts,
         authError,
+        setAuthError,
         lastActivity,
         handleActivity,
         authenticateWithRFID,

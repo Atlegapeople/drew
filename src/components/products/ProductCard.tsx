@@ -2,6 +2,7 @@
 
 // ProductType import removed as it's not used in this component
 import Image from 'next/image';
+// Using global touch sounds instead of individual button sounds
 
 interface ProductCardProps {
   imageUrl: string;
@@ -20,11 +21,19 @@ export default function ProductCard({
   onClick,
   disabled = false
 }: ProductCardProps) {
+  // Using global touch sounds instead of individual button sounds
+  
+  // Handle click (global touch sound will play automatically)
+  const handleClick = () => {
+    if (!disabled && onClick) {
+      onClick();
+    }
+  };
   return (
     <div className="relative pb-[120%] w-full"> {/* Taller container to prevent overlap */}
       <button 
         className={`absolute inset-0 bg-white rounded-lg p-3 text-center border-2 border-gray-200 shadow-md transition-all ${!disabled ? 'hover:translate-y-[-2px] hover:shadow-lg hover:border-[#ff66c4] active:scale-95' : 'opacity-70 cursor-not-allowed'} select-none touch-manipulation flex flex-col items-center justify-between`}
-        onClick={!disabled ? onClick : undefined}
+        onClick={!disabled ? handleClick : undefined}
         disabled={disabled}
       >
         <div className="flex-1 flex items-center justify-center w-full">

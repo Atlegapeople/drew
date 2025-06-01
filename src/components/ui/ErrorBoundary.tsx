@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+// Global touch sounds now handle all interactions
 
 export default function ErrorBoundary({
   children,
@@ -8,6 +9,7 @@ export default function ErrorBoundary({
   children: React.ReactNode;
 }) {
   const [hasError, setHasError] = useState(false);
+  // Using global touch sounds instead of individual button sounds
 
   useEffect(() => {
     const handleError = (error: ErrorEvent) => {
@@ -34,7 +36,7 @@ export default function ErrorBoundary({
             <button
               onClick={() => {
                 setHasError(false);
-                window.location.href = '/lock';
+                window.location.href = '/';
               }}
               className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
             >

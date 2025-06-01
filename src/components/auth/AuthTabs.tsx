@@ -1,5 +1,7 @@
 'use client';
 
+// Using global touch sounds instead of individual button sounds
+
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/contexts/auth-context';
@@ -10,7 +12,19 @@ const PinEntry = dynamic(() => import('@/components/auth/PinEntry'), { ssr: fals
 
 export default function AuthTabs() {
   const [activeTab, setActiveTab] = useState<'rfid' | 'pin'>('rfid');
-  const { authError } = useAuth();
+  const { authError, setAuthError } = useAuth();
+  // Using global touch sounds instead of individual button sounds
+  
+  // Function to handle tab switching with error clearing
+  const handleTabSwitch = (tab: 'rfid' | 'pin') => {
+    // Only clear errors if we're actually switching tabs
+    if (tab !== activeTab) {
+      // Clear any auth errors when switching tabs to prevent sound playback
+      setAuthError(null);
+      // Update the active tab
+      setActiveTab(tab);
+    }
+  };
 
   return (
     <div className="bg-white rounded-xl p-5 shadow-xl border border-gray-100 w-full max-w-md flex flex-col">
@@ -21,7 +35,7 @@ export default function AuthTabs() {
               ? 'bg-[#ff66c4] text-white shadow-md'
               : 'hover:bg-gray-100'
           }`}
-          onClick={() => setActiveTab('rfid')}
+          onClick={() => handleTabSwitch('rfid')}
         >
           RFID Card
         </button>
@@ -31,7 +45,7 @@ export default function AuthTabs() {
               ? 'bg-[#ff66c4] text-white shadow-md'
               : 'hover:bg-gray-100'
           }`}
-          onClick={() => setActiveTab('pin')}
+          onClick={() => handleTabSwitch('pin')}
         >
           PIN Entry
         </button>

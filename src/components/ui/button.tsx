@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import * as React from "react";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'default' | 'destructive' | 'outline' | 'ghost' | 'link';
@@ -13,6 +13,7 @@ export const Button: React.FC<ButtonProps> = ({
   variant = 'default',
   size = 'default',
   children,
+  onClick,
   ...props
 }) => {
   const baseClasses = 'inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none';
@@ -34,7 +35,11 @@ export const Button: React.FC<ButtonProps> = ({
   const classes = `${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`;
   
   return (
-    <button className={classes} {...props}>
+    <button 
+      className={classes} 
+      onClick={onClick}
+      {...props}
+    >
       {children}
     </button>
   );

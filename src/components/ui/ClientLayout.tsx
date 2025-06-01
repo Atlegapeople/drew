@@ -5,8 +5,12 @@ import Header from '@/components/ui/Header';
 import Footer from '@/components/ui/Footer';
 import { AuthProvider } from '@/lib/contexts/auth-context';
 import ErrorBoundary from '@/components/ui/ErrorBoundary';
+import { useGlobalTouchSound } from '@/hooks/useGlobalTouchSound';
 
 export default function ClientLayout({ children }: { children: ReactNode }) {
+  // Initialize global touch sound - will automatically attach touch handlers
+  useGlobalTouchSound();
+  
   return (
     <ErrorBoundary>
       <AuthProvider>
