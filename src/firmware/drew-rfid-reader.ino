@@ -113,12 +113,25 @@ void errorBeep() {
   beep(ERROR_FREQUENCY, LONG_BEEP);
 }
 
+// Flag to track if dispense is in progress to prevent multiple responses
+bool dispensingInProgress = false;
+
 // Function to dispense a product
 void dispenseProduct(String productType) {
+  // Prevent multiple dispensing operations from running at the same time
+  if (dispensingInProgress) {
+    Serial.print("BUSY:ALREADY_DISPENSING:");
+    Serial.println(productType);
+    return;
+  }
+  
+  // Set the flag to prevent multiple operations
+  dispensingInProgress = true;
+  
   // Determine motor direction based on product type
   bool clockwise = (productType == "tampon");
   
-  // Log the dispensing action
+  // Log the dispensing action - just once
   Serial.print("DISPENSING:");
   Serial.println(productType);
   
@@ -134,8 +147,8 @@ void dispenseProduct(String productType) {
   // Start motor
   analogWrite(MOTOR_ENABLE, MOTOR_SPEED);
   
-  // Sound feedback
-  successBeep();
+  // Single beep at start
+  beep(SUCCESS_FREQUENCY, SHORT_BEEP);
   
   // Keep motor running for the dispensing time
   delay(DISPENSE_TIME);
@@ -145,12 +158,12 @@ void dispenseProduct(String productType) {
   digitalWrite(MOTOR_IN1, LOW);
   digitalWrite(MOTOR_IN2, LOW);
   
-  // Confirmation beep
-  beep(SUCCESS_FREQUENCY, SHORT_BEEP);
-  
   // Send completion message
   Serial.print("COMPLETE:");
   Serial.println(productType);
+  
+  // Reset the flag
+  dispensingInProgress = false;
 }
 
 void loop() {

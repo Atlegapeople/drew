@@ -58,21 +58,28 @@ function tryOpenPort() {
     
     // Handle port events
     port.on('open', () => {
-      console.log(`Successfully connected to RFID reader on ${PORT_NAME}`);
+      console.log(`Successfully connected to unified service on ${PORT_NAME}`);
+      console.log('This service now handles both RFID card reading and product dispensing');
       isPortOpen = true;
       portOpenAttempts = 0; // Reset counter on success
     });
     
     port.on('close', () => {
-      console.log('Connection to RFID reader closed');
+      console.log('Connection to serial port closed');
       isPortOpen = false;
     });
     
-    // Create a readline parser to properly handle the new card format
-    const parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
+    // Create a SINGLE readline parser that will be used for all communication
+    // This prevents multiple parser instances from causing duplicate actions
+    if (!global.serialParser) {
+      console.log('Creating global serial parser');
+      global.serialParser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
+    } else {
+      console.log('Reusing existing global serial parser');
+    }
     
-    // Process line-by-line data from the RFID reader
-    parser.on('data', (line) => {
+    // Process line-by-line data from the ESP32
+    global.serialParser.on('data', (line) => {
       console.log(`DEBUG: Received line: ${line}`);
       
       // Check for our new card UID format: "CARDUID:XXXXXXXX"
@@ -102,8 +109,34 @@ function tryOpenPort() {
         
         // Notify any active SSE clients
         notifyClients(lastCardScan);
+
+        // Write scan data to file
+        writeScanToFile(lastCardScan);
       }
-      // Check for the DREW RFID Reader startup message or other information
+      // Check for dispense confirmations (DISPENSING: and COMPLETE:)
+      else if (line.includes('DISPENSING:')) {
+        const productType = line.split(':')[1];
+        console.log(`\n==================================`);
+        console.log(` DISPENSING: ${productType}`);
+        console.log(`TIME: ${new Date().toLocaleTimeString()}`);
+        console.log('==================================\n');
+      } 
+      else if (line.includes('COMPLETE:')) {
+        const productType = line.split(':')[1];
+        console.log(`\n==================================`);
+        console.log(` DISPENSE COMPLETE: ${productType}`);
+        console.log(`TIME: ${new Date().toLocaleTimeString()}`);
+        console.log('==================================\n');
+        
+        // This event is also handled in the dispense request processing code
+      }
+      // Check for system ready and other informational messages
+      else if (line.includes('SYSTEM:READY')) {
+        console.log(`\n==================================`);
+        console.log(` ESP32 SYSTEM READY`);        
+        console.log('==================================\n');
+      }
+      // Check for other informational messages
       else if (line.includes('DREW RFID Reader') || 
                line.includes('Ready to scan') || 
                line.includes('========================')) {
@@ -119,18 +152,16 @@ function tryOpenPort() {
       console.log(`DEBUG RAW: [${data.length} bytes] HEX: ${rawHex} ASCII: ${rawASCII}`);
     });
     
-    // Handle errors
+    // Set a retry mechanism in case the first attempt fails
     port.on('error', (err) => {
-      console.error('Serial port error:', err.message);
-      if (err.message.includes('Access denied') || err.message.includes('in use')) {
-        console.log('Port may be in use by another process. Retrying in 3 seconds...');
-        setTimeout(() => {
-          if (port) {
-            try { port.close(); } catch (e) { /* ignore */ }
-          }
-          tryOpenPort();
-        }, 3000);
-      }
+      console.error(`Serial port error: ${err.message}`);
+      isPortOpen = false;
+      
+      // Try to reconnect after a delay
+      setTimeout(() => {
+        console.log('Attempting to reconnect to serial port...');
+        tryOpenPort();
+      }, 5000); // 5 second retry delay
     });
     
   } catch (err) {
@@ -397,9 +428,267 @@ function startServer(port, attempt = 1) {
 // Start the server
 startServer(API_PORT);
 
+// Configuration for dispense request monitoring
+const DISPENSE_REQUEST_DIR = './public/dispense-requests';
+const DISPENSE_DONE_DIR = './public/dispense-requests/done';
+const DISPENSE_ERROR_DIR = './public/dispense-requests/errors';
+const POLLING_INTERVAL = 500; // Check every 500ms
+let processingDispense = false; // Flag to prevent concurrent processing
+let dispenseQueue = []; // Queue for dispense requests
+let currentDispenseTimeout = null; // Timeout for current dispense operation
+
+// Create necessary directories
+function ensureDispenseDirectories() {
+  // Ensure main directory exists
+  if (!fs.existsSync(DISPENSE_REQUEST_DIR)) {
+    fs.mkdirSync(DISPENSE_REQUEST_DIR, { recursive: true });
+    console.log(`Created directory: ${DISPENSE_REQUEST_DIR}`);
+  }
+  
+  // Ensure 'done' directory exists
+  if (!fs.existsSync(DISPENSE_DONE_DIR)) {
+    fs.mkdirSync(DISPENSE_DONE_DIR, { recursive: true });
+    console.log(`Created directory: ${DISPENSE_DONE_DIR}`);
+  }
+  
+  // Ensure 'errors' directory exists
+  if (!fs.existsSync(DISPENSE_ERROR_DIR)) {
+    fs.mkdirSync(DISPENSE_ERROR_DIR, { recursive: true });
+    console.log(`Created directory: ${DISPENSE_ERROR_DIR}`);
+  }
+}
+
+// Track which files we're processing to prevent race conditions
+const processingFiles = new Set();
+
+// Process a dispense request file
+async function processDispenseRequest(filename) {
+  // Check if file is already being processed
+  if (processingFiles.has(filename)) {
+    console.log(`File ${filename} is already being processed, skipping`);
+    return;
+  }
+  
+  // Prevent concurrent processing
+  if (processingDispense) {
+    console.log(`Already processing a dispense request, queuing ${filename}`);
+    if (!dispenseQueue.includes(filename)) {
+      dispenseQueue.push(filename);
+    }
+    return;
+  }
+  
+  // Mark file as being processed
+  processingFiles.add(filename);
+  processingDispense = true;
+  
+  const filePath = `${DISPENSE_REQUEST_DIR}/${filename}`;
+  console.log(`Processing dispense request: ${filename}`);
+  
+  try {
+    // First check if file exists to prevent race condition
+    if (!fs.existsSync(filePath)) {
+      console.log(`File not found: ${filePath} - it may have been processed by another instance`);
+      processingFiles.delete(filename);
+      processingDispense = false;
+      
+      // Process next request in queue if any
+      if (dispenseQueue.length > 0) {
+        const nextRequest = dispenseQueue.shift();
+        processDispenseRequest(nextRequest);
+      }
+      
+      return;
+    }
+    
+    // Read the JSON file
+    const data = fs.readFileSync(filePath, 'utf8');
+    const request = JSON.parse(data);
+    
+    // Validate the request
+    if (!request.productType || !['pad', 'tampon'].includes(request.productType.toLowerCase())) {
+      throw new Error(`Invalid product type: ${request.productType}`);
+    }
+    
+    // If port is not open, move to error directory
+    if (!isPortOpen || !port) {
+      throw new Error('Serial port is not open');
+    }
+    
+    // Format product type to match firmware expectations (lowercase)
+    const productType = request.productType.toLowerCase();
+    
+    // Send dispense command
+    console.log(`Sending dispense command for ${productType}`);
+    port.write(`DISPENSE:${productType}\n`);
+    
+    // Set up timeout to detect failure
+    const DISPENSE_TIMEOUT = 10000; // 10 seconds
+    
+    // Return a promise that resolves on success or rejects on timeout
+    await new Promise((resolve, reject) => {
+      // Set up a flag to track if this particular dispense operation is complete
+      let isDispenseComplete = false;
+      
+      // Set up success detection based on serial port response
+      const dispenseListener = line => {
+        // Prevent handling after completion
+        if (isDispenseComplete) return;
+        
+        // Listen for success confirmation specific to this product type
+        if (line.includes(`COMPLETE:${productType}`)) {
+          isDispenseComplete = true;
+          cleanup();
+          resolve();
+        }
+      };
+      
+      // Add the listener to the existing global parser
+      if (!global.serialParser) {
+        reject(new Error('Serial parser not initialized'));
+        return;
+      }
+      
+      // Use the global parser
+      global.serialParser.on('data', dispenseListener);
+      
+      // Set timeout
+      currentDispenseTimeout = setTimeout(() => {
+        cleanup();
+        reject(new Error('Dispense operation timed out'));
+      }, DISPENSE_TIMEOUT);
+      
+      // Cleanup function to remove listeners
+      function cleanup() {
+        if (global.serialParser) {
+          global.serialParser.removeListener('data', dispenseListener);
+        }
+        if (currentDispenseTimeout) {
+          clearTimeout(currentDispenseTimeout);
+          currentDispenseTimeout = null;
+        }
+      }
+    });
+    
+    // Check again if file exists before moving (file could have been moved by another process)
+    if (fs.existsSync(filePath)) {
+      // Success! Move the file to the 'done' directory
+      const doneFilePath = `${DISPENSE_DONE_DIR}/${filename}`;
+      fs.renameSync(filePath, doneFilePath);
+      console.log(`✅ Dispensed ${productType} successfully, moved ${filename} to done directory`);
+    } else {
+      console.log(`File ${filename} no longer exists, skipping move operation`);
+    }
+  } catch (err) {
+    console.error(`❌ Error processing dispense request ${filename}:`, err.message);
+    
+    // Only try to move the file if it still exists
+    if (fs.existsSync(filePath)) {
+      try {
+        // Move to error directory with timestamp
+        const timestamp = new Date().getTime();
+        const errorFilePath = `${DISPENSE_ERROR_DIR}/${timestamp}_${filename}`;
+        fs.renameSync(filePath, errorFilePath);
+        console.log(`Moved ${filename} to error directory`);
+        
+        // Add error information
+        const errorData = {
+          originalRequest: JSON.parse(data || '{}'),
+          error: err.message,
+          timestamp: new Date().toISOString()
+        };
+        
+        fs.writeFileSync(
+          `${DISPENSE_ERROR_DIR}/${timestamp}_error_${filename}`, 
+          JSON.stringify(errorData, null, 2)
+        );
+      } catch (moveErr) {
+        console.error(`Failed to move error file: ${moveErr.message}`);
+      }
+    } else {
+      console.log(`File ${filename} no longer exists, cannot move to error directory`);
+    }
+  } finally {
+    // Clean up state
+    processingFiles.delete(filename);
+    processingDispense = false;
+    
+    // Process next request in queue if any
+    if (dispenseQueue.length > 0) {
+      const nextRequest = dispenseQueue.shift();
+      processDispenseRequest(nextRequest);
+    }
+  }
+}
+
+// Check for new dispense request files
+function checkDispenseRequests() {
+  try {
+    // Ensure directories exist
+    ensureDispenseDirectories();
+    
+    // Check if main directory exists (it should, but double-check)
+    if (!fs.existsSync(DISPENSE_REQUEST_DIR)) {
+      console.log(`Creating main dispense request directory: ${DISPENSE_REQUEST_DIR}`);
+      fs.mkdirSync(DISPENSE_REQUEST_DIR, { recursive: true });
+      return; // Return early since we just created it
+    }
+    
+    // List files in the directory
+    const files = fs.readdirSync(DISPENSE_REQUEST_DIR);
+    
+    // Filter only JSON files and ignore subdirectories like 'done' and 'errors'
+    const requestFiles = files.filter(file => {
+      const fullPath = `${DISPENSE_REQUEST_DIR}/${file}`;
+      try {
+        // Skip if it's a directory (like 'done' or 'errors')
+        if (fs.statSync(fullPath).isDirectory()) {
+          return false;
+        }
+        // Only process .json files
+        return file.endsWith('.json');
+      } catch (err) {
+        // If we can't stat the file, ignore it
+        console.log(`Skipping ${file}: ${err.message}`);
+        return false;
+      }
+    });
+    
+    // Process each file
+    if (requestFiles.length > 0) {
+      console.log(`Found ${requestFiles.length} dispense request(s)`);
+      
+      // Process first file, the rest will be queued
+      if (!processingDispense) {
+        processDispenseRequest(requestFiles[0]);
+      } else {
+        // Queue the files if already processing
+        requestFiles.forEach(file => {
+          if (!processingFiles.has(file) && !dispenseQueue.includes(file)) {
+            dispenseQueue.push(file);
+            console.log(`Queued ${file} for processing`);
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Error checking dispense requests:', err.message);
+  }
+}
+
+// Start monitoring for dispense requests
+console.log(`Monitoring for dispense requests in ${DISPENSE_REQUEST_DIR}`);
+ensureDispenseDirectories();
+
+// Set up polling interval
+const dispenseInterval = setInterval(checkDispenseRequests, POLLING_INTERVAL);
+
+// The dispense confirmations are now handled directly in the tryOpenPort function
+// No need for a separate enhancePortParser function
+
 // Handle graceful shutdown
 process.on('SIGINT', () => {
-  console.log('Shutting down D.R.E.W. RFID Service...');
+  console.log('Shutting down D.R.E.W. Unified Service...');
   
   // Close all client connections
   clients.forEach(client => {
@@ -410,13 +699,27 @@ process.on('SIGINT', () => {
     }
   });
   
+  // Clear polling intervals
+  if (dispenseInterval) {
+    clearInterval(dispenseInterval);
+    console.log('Stopped dispense request monitoring');
+  }
+  
+  // Clear any pending dispense timeouts
+  if (currentDispenseTimeout) {
+    clearTimeout(currentDispenseTimeout);
+    console.log('Cleared pending dispense timeouts');
+  }
+  
   // Close the serial port
   if (port) {
     port.close();
+    console.log('Closed serial connection');
   }
   
   // Close the server
   server.close();
+  console.log('Closed HTTP server');
   
   process.exit(0);
 });
