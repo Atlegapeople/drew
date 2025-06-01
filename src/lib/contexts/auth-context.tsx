@@ -11,6 +11,7 @@ interface AuthResult {
   cardUid?: string;
   accessLevel?: string;
   message?: string;
+  sessionId?: string; // Add sessionId for cookie management
 }
 
 // Define the auth context shape
@@ -26,6 +27,7 @@ interface AuthContextType {
   failedAttempts: number;
   authError: string | null;
   lastActivity: number;
+  handleActivity?: () => void; // Add handleActivity function
   authenticateWithRFID: (cardUid?: string) => Promise<AuthResult>;
   authenticateWithPIN: (enteredPin: string) => Promise<AuthResult>;
   logout: () => void;
@@ -65,6 +67,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionTimeoutId, setSessionTimeoutId] = useState<NodeJS.Timeout | null>(null);
   
   const router = useRouter();
+  
+  // Function to handle user activity and reset session timeout
+  const handleActivity = () => {
+    setLastActivity(Date.now());
+    resetSessionTimeout();
+  };
+  
+  // Effect to track user activity
+  useEffect(() => {
+    // Add event listeners for user activity
+    window.addEventListener('click', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('touchstart', handleActivity);
+    window.addEventListener('scroll', handleActivity);
+    
+    // Clean up event listeners
+    return () => {
+      window.removeEventListener('click', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      window.removeEventListener('scroll', handleActivity);
+    };
+  }, []);
   
   // Effect to check if we have a stored session
   useEffect(() => {
@@ -152,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('click', handleActivity);
       window.removeEventListener('touchstart', handleActivity);
       window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('scroll', handleActivity); // Remove scroll event listener
     };
   }, []);
   
@@ -162,11 +190,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     
     if (isAuthenticated) {
-      // Set timeout for 1 minute (60000ms)
+      // Set timeout for 2 minutes (120000ms) to allow for dispensing operations
       const timeoutId = setTimeout(() => {
         console.log('Session timeout - logging out');
         logout();
-      }, 60000); // 1 minute of inactivity
+      }, 120000); // 2 minutes of inactivity
       
       setSessionTimeoutId(timeoutId);
     }
@@ -174,59 +202,100 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   
   // Set up a session
   const setSession = (auth: AuthResult) => {
-    setIsAuthenticated(true);
-    setProfileId(auth.profileId || null);
-    setCardUid(auth.cardUid || null);
-    setAccessLevel(auth.accessLevel || 'user');
-    setLastActivity(Date.now());
-    
-    // Store session in localStorage with 1 hour expiry
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-    localStorage.setItem('drew_session', JSON.stringify({
-      profileId: auth.profileId,
-      cardUid: auth.cardUid,
-      accessLevel: auth.accessLevel,
-      expiresAt: expiresAt.toISOString(),
-    }));
-    
-    resetSessionTimeout();
+    if (auth.success && auth.profileId) {
+      setIsAuthenticated(true);
+      setProfileId(auth.profileId);
+      setCardUid(auth.cardUid || null);
+      setAccessLevel(auth.accessLevel || null);
+      setAuthError(null);
+      setLastActivity(Date.now());
+      
+      // Reset session timeout
+      resetSessionTimeout();
+      
+      // Store session in localStorage
+      const expiresAt = new Date();
+      expiresAt.setMinutes(expiresAt.getMinutes() + 2); // 2 minutes from now
+      
+      // Store session info in localStorage
+      const sessionData = {
+        profileId: auth.profileId,
+        cardUid: auth.cardUid,
+        accessLevel: auth.accessLevel,
+        expiresAt: expiresAt.toISOString(),
+        sessionId: auth.sessionId // Include sessionId from auth response
+      };
+      
+      // Save to localStorage
+      localStorage.setItem('drew_session', JSON.stringify(sessionData));
+      
+      // Make a call to refresh the session cookie using window.location.origin to ensure proper port
+      fetch(`${window.location.origin}/api/auth/check-session`, {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          'Authorization': `Bearer ${auth.sessionId}` // Add session ID in authorization header
+        }
+      }).catch(err => {
+        console.error('Error refreshing session cookie:', err);
+      });
+    }
   };
   
   // RFID authentication
   const authenticateWithRFID = async (cardUid?: string): Promise<AuthResult> => {
     try {
-      setAuthError(null);
-      
-      // For testing, if no card is provided, use a demo card
-      const uidToUse = cardUid || 'DEMO0001';
-      
-      // Use the auth API endpoint instead of direct database access
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          method: 'rfid',
-          cardUid: uidToUse
-        }),
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        setSession(result);
-        // Route based on access level
-        if (result.accessLevel === 'admin') {
-          router.push('/admin');
-        } else {
-          router.push('/dashboard');
+      // Simple approach - directly set authentication state if we have a card UID
+      if (cardUid) {
+        console.log('Directly authenticating with card:', cardUid);
+        
+        // Get the access level directly from the database via the simplified API
+        const response = await fetch('/api/auth', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            method: 'rfid',
+            cardUid
+          })
+        });
+        
+        if (!response.ok) {
+          console.error('Auth API error:', response.status);
+          return { success: false, message: 'Server error' };
         }
-      } else {
-        setAuthError(result.message || 'Authentication failed');
+        
+        const result = await response.json();
+        console.log('Auth result:', result);
+        
+        if (result.success) {
+          // Set authentication state
+          setIsAuthenticated(true);
+          setProfileId(result.profileId);
+          setCardUid(result.cardUid);
+          setAccessLevel(result.accessLevel);
+          setLastActivity(Date.now());
+          
+          // Reset session timeout
+          resetSessionTimeout();
+          
+          // Route based on access level
+          if (result.accessLevel === 'admin') {
+            router.push('/admin');
+          } else {
+            router.push('/dashboard');
+          }
+          
+          return { success: true };
+        } else {
+          setAuthError(result.message || 'Authentication failed');
+          return { success: false, message: result.message || 'Authentication failed' };
+        }
       }
       
-      return result;
+      return { success: false, message: 'No card UID provided' };
     } catch (error) {
       console.error('RFID auth error:', error);
       setAuthError('Authentication error');
@@ -352,6 +421,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         failedAttempts,
         authError,
         lastActivity,
+        handleActivity,
         authenticateWithRFID,
         authenticateWithPIN,
         logout

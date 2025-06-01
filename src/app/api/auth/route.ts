@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance, verifyPin, hashPin } from '@/lib/db/server-db';
 import * as crypto from 'crypto';
 
+// Generate a session ID
+function generateSessionId() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+// Create a session for a user (simplified to avoid sessions table dependency)
+async function createSession(profileId: number) {
+  // Simply generate a session ID without database storage
+  // This avoids the need for a sessions table in the database
+  return generateSessionId();
+}
+
 // Handle RFID authentication
 export async function POST(request: NextRequest) {
   try {
@@ -26,19 +38,25 @@ export async function POST(request: NextRequest) {
         });
       }
       
-      // Update last access time
-      db.prepare('UPDATE access_profiles SET last_access = CURRENT_TIMESTAMP WHERE id = ?').run(profile.id);
+      // Update last access time with JavaScript Date
+      const currentTime = new Date().toISOString();
+      db.prepare('UPDATE access_profiles SET last_access = ? WHERE id = ?').run(currentTime, profile.id);
       
       // Log successful access
       db.prepare(
         'INSERT INTO access_logs (profile_id, card_uid, method, result) VALUES (?, ?, ?, ?)'
       ).run(profile.id, cardUid, 'rfid', 'granted');
       
+      // Create a session
+      const sessionId = await createSession(profile.id);
+      
+      // Return simple JSON response with session ID
       return NextResponse.json({
         success: true,
         profileId: profile.id,
         cardUid: profile.card_uid,
-        accessLevel: profile.access_level
+        accessLevel: profile.access_level,
+        sessionId: sessionId
       });
     } 
     else if (method === 'pin' && pin) {
@@ -50,19 +68,25 @@ export async function POST(request: NextRequest) {
         // Await the result of verifyPin
         const isPinValid = await verifyPin(pin, profile.pin_hash, profile.pin_salt);
         if (isPinValid) {
-          // Update last access time
-          db.prepare('UPDATE access_profiles SET last_access = CURRENT_TIMESTAMP WHERE id = ?').run(profile.id);
+          // Update last access time with JavaScript Date
+          const currentTime = new Date().toISOString();
+          db.prepare('UPDATE access_profiles SET last_access = ? WHERE id = ?').run(currentTime, profile.id);
           
           // Log successful access
           db.prepare(
             'INSERT INTO access_logs (profile_id, card_uid, method, result) VALUES (?, ?, ?, ?)'
           ).run(profile.id, profile.card_uid, 'pin', 'granted');
           
+          // Create a session
+          const sessionId = await createSession(profile.id);
+          
+          // Return simple JSON response with session ID
           return NextResponse.json({
             success: true,
             profileId: profile.id,
             cardUid: profile.card_uid,
-            accessLevel: profile.access_level
+            accessLevel: profile.access_level,
+            sessionId: sessionId
           });
         }
       }
