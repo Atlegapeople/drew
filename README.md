@@ -2,7 +2,7 @@
 
 **Project:** D.R.E.W. (Dignity • Respect • Empowerment for Women)  
 **Client:** ABSA  
-**Deployment Target:** Raspberry Pi 4 with 10” Touchscreen (Offline)
+**Deployment Target:** Raspberry Pi 4 with 10" Touchscreen (Offline)
 
 This document outlines the current status of the D.R.E.W. access control system for smart feminine hygiene vending machines. The system is designed for secure, offline use and supports user authentication via RFID card or PIN entry.
 
@@ -76,6 +76,17 @@ This document outlines the current status of the D.R.E.W. access control system 
 
 ---
 
+## ✅ Dispensing System
+
+- ESP32 firmware handles product dispensing with motor control and buzzer feedback.
+- Implemented a unified RFID and dispense service to handle both card reading and product dispensing.
+- Added robust dispense management with concurrency prevention on the ESP32 to avoid multiple motor activations.
+- Created an enhanced DispensingScreen component with visual loading indicators, progress tracking, and completion feedback.
+- Serial port communication between the Node.js service and ESP32 uses a centralized parser to prevent duplicate event handling.
+- Toast notifications provide clear user feedback throughout the dispensing process.
+
+---
+
 ## ✅ Deployment Readiness
 
 - Current system is **deployment-ready** for a Raspberry Pi 4 with 10" touchscreen.
@@ -136,11 +147,15 @@ This document outlines the current status of the D.R.E.W. access control system 
    ```
    The application will be available at http://localhost:3000
 
-4. **Start the RFID service in a separate terminal**
+4. **Start the unified RFID and dispense service in a separate terminal**
    ```bash
    node src/scripts/drew-rfid-service.js
    ```
-   This service monitors the serial port for RFID card scans and writes them to JSON files that the main application reads. It's essential for RFID card authentication to work.
+   This service:
+   - Monitors the serial port for RFID card scans
+   - Writes scan data to JSON files that the main application reads
+   - Handles dispense requests by sending commands to the ESP32 
+   - Moves processed requests to a `done` subfolder after they're handled
 
 5. **Auto-start on boot (optional)**
    Add the following to `/etc/rc.local` before the `exit 0` line:
@@ -162,25 +177,35 @@ The application includes a global touch sound system with specific sounds for:
 - Screen touches and button presses
 - Success and error feedback during authentication
 - RFID card scanning events
+- Dispense completion feedback through ESP32 buzzer
 
 Sound can be enabled/disabled via the settings interface.
 
-### RFID Integration
+### RFID and Dispense Integration
 
-The system uses a two-part approach for RFID card authentication:
+The system uses a unified service approach for RFID card authentication and product dispensing:
 
-1. **RFID Hardware Service** (`drew-rfid-service.js`):
+1. **Unified Service** (`drew-rfid-service.js`):
    - Runs as a separate Node.js process
    - Monitors the serial port for incoming RFID card scans
    - Writes scan data to JSON files in `public/card-scans/`
-   - Creates both timestamped files and a `latest.json` file for current scans
-   - Moves processed scans to a `done` subfolder after they're handled
+   - Processes dispense requests from the `public/dispense-requests/` directory
+   - Sends dispense commands to the ESP32 firmware via serial port
+   - Monitors dispense completion messages from the ESP32
+   - Uses a single global parser instance to handle all serial communication
 
 2. **Frontend Integration**:
    - The application periodically checks for new card scans
    - When a scan is detected, it verifies the card against the database
-   - Provides visual and audio feedback based on authentication results
-   - Manages access control based on card permissions
+   - Creates dispense request files when users select products
+   - Displays an enhanced loading screen with progress indication during dispensing
+   - Provides visual feedback and toast notifications throughout the process
+
+3. **ESP32 Firmware**:
+   - Controls motor direction and speed for dispensing products
+   - Provides buzzer feedback at the start of dispensing
+   - Implements concurrency controls to prevent multiple dispense operations
+   - Sends status messages to the Node.js service via serial communication
 
 For development without physical RFID hardware, you can simulate card scans by manually creating JSON files in the `public/card-scans/` directory with the following format:
 
@@ -190,3 +215,11 @@ For development without physical RFID hardware, you can simulate card scans by m
   "timestamp": "2025-06-01T15:28:09"
 }
 ```
+
+Similarly, to test the dispense functionality, you can manually create JSON files in the `public/dispense-requests/` directory with the format:
+
+```json
+{
+  "productType": "tampon",
+  "timestamp": "2025-06-01T15:28:09"
+}

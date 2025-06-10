@@ -1,0 +1,9 @@
+{
+  "originalRequest": {
+    "productType": "tampon",
+    "timestamp": 1749564692342,
+    "status": "pending"
+  },
+  "error": "Dispense operation timed out",
+  "timestamp": "2025-06-10T14:11:47.567Z"
+}

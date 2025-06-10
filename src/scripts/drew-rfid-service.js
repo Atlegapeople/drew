@@ -32,6 +32,11 @@ let port;
 let portOpenAttempts = 0;
 const MAX_PORT_ATTEMPTS = 3;
 
+// Debounce variables to prevent duplicate card scanning
+let lastCardUIDProcessed = null;
+let lastCardProcessTime = 0;
+const CARD_PROCESS_DEBOUNCE = 500; // 500ms debounce time
+
 // Function to try opening the port with retries
 function tryOpenPort() {
   try {
@@ -90,28 +95,47 @@ function tryOpenPort() {
         // Extract the card UID (match[1] contains the hex string)
         const cardID = match[1].toUpperCase();
         
-        // Format with colons between each pair of characters
-        const formattedCardID = cardID.match(/.{1,2}/g).join(':');
+        // Apply debouncing - check if this is the same card recently processed
+        const currentTime = Date.now();
+        const isDuplicate = (cardID === lastCardUIDProcessed) && 
+                           (currentTime - lastCardProcessTime < CARD_PROCESS_DEBOUNCE);
         
-        // Store and log the card scan
-        lastCardScan = {
-          cardUID: cardID,                // Full UID (e.g., "A955AF02")
-          formattedUID: formattedCardID, // Formatted (e.g., "A9:55:AF:02")
-          timestamp: new Date().toISOString()
-        };
-        
-        // Log card scan in a prominent way
-        console.log('\n==================================');
-        console.log(`CARD SCANNED: ${formattedCardID}`);
-        console.log(`CARD UID: ${cardID}`);
-        console.log(`TIME: ${new Date().toLocaleTimeString()}`);
-        console.log('==================================\n');
-        
-        // Notify any active SSE clients
-        notifyClients(lastCardScan);
-
-        // Write scan data to file
-        writeScanToFile(lastCardScan);
+        if (!isDuplicate) {
+          // Update debounce tracking variables
+          lastCardUIDProcessed = cardID;
+          lastCardProcessTime = currentTime;
+          
+                  // Format with colons between each pair of characters
+          const formattedCardID = cardID.match(/.{1,2}/g)?.join(':') || cardID;
+          
+          // Store and log the card scan
+          lastCardScan = {
+            cardUID: cardID,                // Full UID (e.g., "A955AF02")
+            formattedUID: formattedCardID, // Formatted (e.g., "A9:55:AF:02")
+            timestamp: new Date().toISOString()
+          };
+          
+          // Log card scan in a prominent way
+          console.log('\n==================================');
+          console.log(`CARD SCANNED: ${formattedCardID}`);
+          console.log(`CARD UID: ${cardID}`);
+          console.log(`TIME: ${new Date().toLocaleTimeString()}`);
+          console.log('==================================\n');
+          
+          // Write scan data to file first
+          writeScanToFile(lastCardScan);
+          
+          // Then notify any active SSE clients (without writing file again)
+          clients.forEach(client => {
+            try {
+              client.write(`event: card\ndata: ${JSON.stringify(lastCardScan)}\n\n`);
+            } catch (err) {
+              console.error('Error notifying client:', err.message);
+            }
+          });
+        } else {
+          console.log(`Ignoring duplicate card read: ${cardID} (debounced)`);
+        }
       }
       // Check for dispense confirmations (DISPENSING: and COMPLETE:)
       else if (line.includes('DISPENSING:')) {
@@ -182,10 +206,7 @@ const clients = [];
 
 // Function to notify all connected clients of a card scan
 function notifyClients(scanData) {
-  // First write to a file for the admin panel to read
-  writeScanToFile(scanData);
-  
-  // Then notify connected SSE clients (keep this for backward compatibility)
+  // Only notify connected SSE clients
   clients.forEach(client => {
     try {
       client.write(`event: card\ndata: ${JSON.stringify(scanData)}\n\n`);
@@ -485,34 +506,26 @@ async function processDispenseRequest(filename) {
   const filePath = `${DISPENSE_REQUEST_DIR}/${filename}`;
   console.log(`Processing dispense request: ${filename}`);
   
+  // Define data variable at this scope to be accessible in catch block
   try {
-    // First check if file exists to prevent race condition
     if (!fs.existsSync(filePath)) {
-      console.log(`File not found: ${filePath} - it may have been processed by another instance`);
-      processingFiles.delete(filename);
+      console.log(`Dispense request ${filename} no longer exists, skipping`);
       processingDispense = false;
-      
-      // Process next request in queue if any
-      if (dispenseQueue.length > 0) {
-        const nextRequest = dispenseQueue.shift();
-        processDispenseRequest(nextRequest);
-      }
-      
+      processingFiles.delete(filename);
+      processNextDispense();
       return;
     }
     
-    // Read the JSON file
-    const data = fs.readFileSync(filePath, 'utf8');
-    const request = JSON.parse(data);
-    
-    // Validate the request
-    if (!request.productType || !['pad', 'tampon'].includes(request.productType.toLowerCase())) {
-      throw new Error(`Invalid product type: ${request.productType}`);
+    // Read and parse the request file
+    data = fs.readFileSync(filePath, 'utf8');
+    try {
+      request = JSON.parse(data);
+    } catch (parseErr) {
+      throw new Error(`Invalid JSON in dispense request ${filename}: ${parseErr.message}`);
     }
-    
-    // If port is not open, move to error directory
-    if (!isPortOpen || !port) {
-      throw new Error('Serial port is not open');
+
+    if (!request.productType) {
+      throw new Error(`Missing productType in dispense request ${filename}`);
     }
     
     // Format product type to match firmware expectations (lowercase)
@@ -523,7 +536,7 @@ async function processDispenseRequest(filename) {
     port.write(`DISPENSE:${productType}\n`);
     
     // Set up timeout to detect failure
-    const DISPENSE_TIMEOUT = 10000; // 10 seconds
+    const DISPENSE_TIMEOUT = 60000; // 60 seconds - significantly increased to ensure we catch completion message
     
     // Return a promise that resolves on success or rejects on timeout
     await new Promise((resolve, reject) => {
@@ -535,8 +548,13 @@ async function processDispenseRequest(filename) {
         // Prevent handling after completion
         if (isDispenseComplete) return;
         
+        // Add detailed logging to debug timeout issues
+        console.log(`DISPENSE MONITOR: Received line "${line}", waiting for "COMPLETE:${productType}"`);
+        
         // Listen for success confirmation specific to this product type
-        if (line.includes(`COMPLETE:${productType}`)) {
+        // Be more flexible with the matching to account for any extra characters
+        if (line.toLowerCase().includes(`complete:${productType.toLowerCase()}`)) {
+          console.log(`✅ DISPENSE SUCCESS: Found completion message for ${productType}`);
           isDispenseComplete = true;
           cleanup();
           resolve();
@@ -573,9 +591,16 @@ async function processDispenseRequest(filename) {
     // Check again if file exists before moving (file could have been moved by another process)
     if (fs.existsSync(filePath)) {
       // Success! Move the file to the 'done' directory
-      const doneFilePath = `${DISPENSE_DONE_DIR}/${filename}`;
+      const timestamp = Date.now();
+      const doneFilePath = `${DISPENSE_DONE_DIR}/${timestamp}_${filename}`;
       fs.renameSync(filePath, doneFilePath);
       console.log(`✅ Dispensed ${productType} successfully, moved ${filename} to done directory`);
+      
+      // Do NOT recreate the latest.json file after moving it
+      // This ensures it is properly moved out of the main directory
+      // A new latest.json will be created next time a card is scanned
+      console.log(`Successfully moved ${filename} out of the active directory`);
+      
     } else {
       console.log(`File ${filename} no longer exists, skipping move operation`);
     }
@@ -591,9 +616,23 @@ async function processDispenseRequest(filename) {
         fs.renameSync(filePath, errorFilePath);
         console.log(`Moved ${filename} to error directory`);
         
+        // We deliberately don't recreate latest.json - a new one will be created on next card scan
+        
         // Add error information
+        let originalRequest = {};
+        
+        // Only try to parse data if it was successfully read
+        try {
+          // data might be null if error occurred before reading the file
+          if (data !== null) {
+            originalRequest = JSON.parse(data);
+          }
+        } catch (parseErr) {
+          console.warn(`Could not parse original request data: ${parseErr.message}`);
+        }
+        
         const errorData = {
-          originalRequest: JSON.parse(data || '{}'),
+          originalRequest,
           error: err.message,
           timestamp: new Date().toISOString()
         };
@@ -637,42 +676,69 @@ function checkDispenseRequests() {
     // List files in the directory
     const files = fs.readdirSync(DISPENSE_REQUEST_DIR);
     
-    // Filter only JSON files and ignore subdirectories like 'done' and 'errors'
-    const requestFiles = files.filter(file => {
-      const fullPath = `${DISPENSE_REQUEST_DIR}/${file}`;
-      try {
-        // Skip if it's a directory (like 'done' or 'errors')
-        if (fs.statSync(fullPath).isDirectory()) {
-          return false;
-        }
-        // Only process .json files
-        return file.endsWith('.json');
-      } catch (err) {
-        // If we can't stat the file, ignore it
-        console.log(`Skipping ${file}: ${err.message}`);
-        return false;
-      }
-    });
+    // Only check for latest.json file - ignore all other files
+    const latestFilePath = `${DISPENSE_REQUEST_DIR}/latest.json`;
     
-    // Process each file
-    if (requestFiles.length > 0) {
-      console.log(`Found ${requestFiles.length} dispense request(s)`);
+    // Check if latest.json exists and is not already being processed
+    if (fs.existsSync(latestFilePath) && !processingFiles.has('latest.json')) {
+      console.log('Found latest dispense request');
       
-      // Process first file, the rest will be queued
+      // Process latest.json if not already processing
       if (!processingDispense) {
-        processDispenseRequest(requestFiles[0]);
-      } else {
-        // Queue the files if already processing
-        requestFiles.forEach(file => {
-          if (!processingFiles.has(file) && !dispenseQueue.includes(file)) {
-            dispenseQueue.push(file);
-            console.log(`Queued ${file} for processing`);
-          }
-        });
+        processDispenseRequest('latest.json');
+      } else if (!dispenseQueue.includes('latest.json')) {
+        // Queue the latest.json if already processing another request
+        dispenseQueue.push('latest.json');
+        console.log('Queued latest.json for processing');
       }
     }
+    
+    // Clean up any other json files that aren't latest.json
+    cleanupOldDispenseRequests();
+  
   } catch (err) {
     console.error('Error checking dispense requests:', err.message);
+  }
+}
+
+// Cleanup function to move old dispense requests to archive folder
+function cleanupOldDispenseRequests() {
+  try {
+    console.log('Cleaning up old dispense request files...');
+    // Ensure directories exist
+    ensureDispenseDirectories();
+    
+    // Create archive dir if it doesn't exist
+    const archiveDir = `${DISPENSE_REQUEST_DIR}/archive`;
+    if (!fs.existsSync(archiveDir)) {
+      fs.mkdirSync(archiveDir, { recursive: true });
+    }
+    
+    // Get all files except directories and latest.json
+    const files = fs.readdirSync(DISPENSE_REQUEST_DIR);
+    const filesToArchive = files.filter(file => {
+      const fullPath = `${DISPENSE_REQUEST_DIR}/${file}`;
+      return (
+        file !== 'latest.json' && 
+        !fs.statSync(fullPath).isDirectory() && 
+        file.endsWith('.json')
+      );
+    });
+    
+    // Move files to archive
+    if (filesToArchive.length > 0) {
+      console.log(`Found ${filesToArchive.length} old dispense request files to archive`);
+      filesToArchive.forEach(file => {
+        const oldPath = `${DISPENSE_REQUEST_DIR}/${file}`;
+        const newPath = `${archiveDir}/${file}`;
+        fs.renameSync(oldPath, newPath);
+      });
+      console.log('Old dispense request files have been archived');
+    } else {
+      console.log('No old dispense request files to archive');
+    }
+  } catch (err) {
+    console.error('Error during cleanup:', err.message);
   }
 }
 
@@ -680,8 +746,14 @@ function checkDispenseRequests() {
 console.log(`Monitoring for dispense requests in ${DISPENSE_REQUEST_DIR}`);
 ensureDispenseDirectories();
 
-// Set up polling interval
+// Run initial cleanup
+cleanupOldDispenseRequests();
+
+// Set up polling interval for dispense requests
 const dispenseInterval = setInterval(checkDispenseRequests, POLLING_INTERVAL);
+
+// Set up an interval to clean up old files every hour
+const cleanupInterval = setInterval(cleanupOldDispenseRequests, 3600000); // 1 hour
 
 // The dispense confirmations are now handled directly in the tryOpenPort function
 // No need for a separate enhancePortParser function
@@ -703,6 +775,12 @@ process.on('SIGINT', () => {
   if (dispenseInterval) {
     clearInterval(dispenseInterval);
     console.log('Stopped dispense request monitoring');
+  }
+  
+  // Clear cleanup interval
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    console.log('Stopped automatic cleanup');
   }
   
   // Clear any pending dispense timeouts
